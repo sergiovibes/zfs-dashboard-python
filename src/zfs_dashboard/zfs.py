@@ -66,8 +66,8 @@ def parse_zpool_status(output: str) -> Dict[str, List[Vdev]]:
         if not in_config or not current_pool:
             continue
             
-        # Skip headers
-        if stripped.startswith("NAME") or not stripped:
+        # Skip headers and errors line
+        if stripped.startswith("NAME") or stripped.startswith("errors:") or not stripped:
             continue
             
         # Basic parsing of config lines
