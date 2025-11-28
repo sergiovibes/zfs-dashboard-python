@@ -5,6 +5,7 @@ from textual.reactive import reactive
 from textual.message import Message
 
 from ..models import Pool, Vdev, Dataset
+from ..utils import humanize_bytes
 
 class PoolOverview(Static):
     pool = reactive(None)
@@ -84,8 +85,8 @@ class VdevList(Static):
                 vdev.type,
                 str(vdev.read_ops),
                 str(vdev.write_ops),
-                str(vdev.read_bytes),
-                str(vdev.write_bytes)
+                humanize_bytes(vdev.read_bytes),
+                humanize_bytes(vdev.write_bytes)
             )
 
 class DatasetTreeWidget(Static):
