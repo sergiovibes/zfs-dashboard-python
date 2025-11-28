@@ -94,8 +94,9 @@ class DatasetTreeWidget(Static):
     dataset_filter = reactive("")
 
     class Selected(Message):
-        def __init__(self, dataset: Dataset):
+        def __init__(self, dataset: Dataset, tree_id: str):
             self.dataset = dataset
+            self.tree_id = tree_id
             super().__init__()
 
     def compose(self) -> ComposeResult:
@@ -170,7 +171,7 @@ class DatasetTreeWidget(Static):
 
     def on_tree_node_selected(self, event: Tree.NodeSelected):
         if event.node.data:
-            self.post_message(self.Selected(event.node.data))
+            self.post_message(self.Selected(event.node.data, self.id))
 
 class DatasetDetails(Static):
     dataset = reactive(None)

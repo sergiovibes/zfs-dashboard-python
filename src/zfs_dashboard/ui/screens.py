@@ -138,7 +138,7 @@ class DashboardScreen(Screen):
         
         # The message bubbles up from the tree.
         # We can look at message.control.id to find the pool name
-        tree_id = message.control.id # e.g. tree-tank
+        tree_id = message.tree_id # e.g. tree-tank
         if tree_id and tree_id.startswith("tree-"):
             pool_name = tree_id.split("-", 1)[1]
             details = self.query_one(f"#details-{pool_name}", DatasetDetails)
