@@ -2,6 +2,8 @@
 
 A terminal-based user interface (TUI) for monitoring ZFS pools, built with Python and Textual.
 
+[![asciicast](https://asciinema.org/a/PB6V69puintF9oqmgB34RvXWy.svg)](https://asciinema.org/a/PB6V69puintF9oqmgB34RvXWy)
+
 ## Features
 
 - **Real-time Monitoring**: View pool status, capacity, and IOPS in real-time.
