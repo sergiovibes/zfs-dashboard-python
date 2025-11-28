@@ -143,3 +143,52 @@ class DashboardScreen(Screen):
             pool_name = tree_id.split("-", 1)[1]
             details = self.query_one(f"#details-{pool_name}", DatasetDetails)
             details.dataset = message.dataset
+
+    def update_iostat_data(self, stats):
+        # stats: (name, read_ops, write_ops, read_bytes, write_bytes)
+        name, r_ops, w_ops, r_bytes, w_bytes = stats
+        
+        # We need to find the pool or vdev with this name.
+        # Since we don't know if it's a pool or vdev easily without context,
+        # we can try to find widgets that match.
+        # Pools have IDs like `overview-{pool_name}`
+        # Vdevs are inside `VdevList`, which we need to access.
+        
+        # 1. Check if it's a pool
+        # We can iterate over our pools to see if name matches
+        for pool in self.pools:
+            if pool.name == name:
+                # Update pool stats
+                pool.read_ops = r_ops
+                pool.write_ops = w_ops
+                pool.read_bytes = r_bytes
+                pool.write_bytes = w_bytes
+                
+                # Update UI
+                try:
+                    overview = self.query_one(f"#overview-{pool.name}", PoolOverview)
+                    overview.update_stats()
+                except Exception:
+                    pass
+                    
+                # Also update "All" tab if it exists
+                if len(self.pools) > 1:
+                    self.update_all_tab()
+                return
+
+            # 2. Check if it's a vdev in this pool
+            for vdev in pool.vdevs:
+                if vdev.name == name:
+                    vdev.read_ops = r_ops
+                    vdev.write_ops = w_ops
+                    vdev.read_bytes = r_bytes
+                    vdev.write_bytes = w_bytes
+                    
+                    # Update VdevList
+                    try:
+                        vdev_list = self.query_one(f"#vdevs-{pool.name}", VdevList)
+                        vdev_list.update_vdevs()
+                    except Exception:
+                        pass
+                    return
+

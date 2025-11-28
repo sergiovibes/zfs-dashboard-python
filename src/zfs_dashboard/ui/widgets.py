@@ -21,6 +21,11 @@ class PoolOverview(Static):
         yield Label("Write IOPS", classes="header-small")
         yield Sparkline(data=[], summary_function=max, id="write-ops-spark")
 
+    def update_stats(self):
+        """Force update of stats from self.pool"""
+        if self.pool:
+            self.watch_pool(self.pool)
+
     def watch_pool(self, pool: Pool):
         if pool:
             self.query_one("#pool-state", Label).update(f"State: {pool.state} | Health: {pool.health}")
@@ -61,6 +66,10 @@ class VdevList(Static):
     def on_mount(self):
         table = self.query_one(DataTable)
         table.add_columns("Name", "State", "Read", "Write", "Cksum", "Type", "R IOPS", "W IOPS", "R Bytes", "W Bytes")
+
+    def update_vdevs(self):
+        """Force update of vdev table"""
+        self.watch_vdevs(self.vdevs)
 
     def watch_vdevs(self, vdevs: list[Vdev]):
         table = self.query_one(DataTable)

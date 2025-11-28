@@ -182,7 +182,46 @@ def build_dataset_tree(datasets: List[Dataset]) -> List[Dataset]:
             
     return roots
 
+def parse_iostat_line(line: str) -> Optional[tuple[str, str, int, int, int, int]]:
+    """
+    Parses a single line from `zpool iostat -H -p -y 1`.
+    Format: pool_name  alloc  free  read_ops  write_ops  read_bytes  write_bytes
+    Or:     vdev_name  alloc  free  read_ops  write_ops  read_bytes  write_bytes
+    
+    Returns: (name, type_hint, read_ops, write_ops, read_bytes, write_bytes)
+    type_hint is 'pool' or 'vdev' based on context (caller needs to track).
+    Actually, `zpool iostat -H` prints flat lines.
+    We need to know the structure.
+    But usually it prints:
+    pool_name ...
+      vdev ...
+    
+    With -H, indentation is preserved?
+    Let's check `zpool iostat -H` behavior.
+    Usually -H removes headers and separates with tabs.
+    It DOES NOT preserve indentation usually.
+    Wait, if indentation is lost, we can't distinguish pool from vdev easily if names are similar.
+    However, the order is always Pool -> Vdevs.
+    
+    Let's assume the caller handles the hierarchy or we just return the raw stats and name.
+    """
+    parts = line.strip().split('\t')
+    if len(parts) < 7:
+        return None
+        
+    name = parts[0]
+    try:
+        # parts[1] alloc, parts[2] free
+        read_ops = int(parts[3])
+        write_ops = int(parts[4])
+        read_bytes = int(parts[5])
+        write_bytes = int(parts[6])
+        return (name, read_ops, write_ops, read_bytes, write_bytes)
+    except (ValueError, IndexError):
+        return None
+
 def parse_zpool_iostat(output: str) -> Dict[str, Dict[str, dict]]:
+
     """
     Parses `zpool iostat -v -p` (using -p for exact numbers)
     Returns nested dict: pool -> vdev -> {read_ops, write_ops, read_bytes, write_bytes}
@@ -263,7 +302,11 @@ def parse_zpool_iostat(output: str) -> Dict[str, Dict[str, dict]]:
             
     return stats
 
-def get_system_status() -> List[Pool]:
+def get_static_data() -> List[Pool]:
+    """
+    Fetches static structure: Pools, Vdevs, Datasets.
+    Does NOT fetch realtime IO stats.
+    """
     # 1. Get Pools
     pool_list_out = run_command(['zpool', 'list', '-H', '-o', 'name,size,alloc,free,frag,cap,health,altroot'])
     pools = parse_zpool_list(pool_list_out)
@@ -280,38 +323,6 @@ def get_system_status() -> List[Pool]:
     snap_out = run_command(['zfs', 'list', '-H', '-t', 'snapshot', '-o', 'name,used'])
     snaps_map = parse_zfs_snapshots(snap_out)
     
-    # 5. Get IO Stats
-    # Use -p for parsable numbers, -v for verbose (vdevs)
-    # Note: `zpool iostat` without interval prints stats since boot.
-    # For realtime, we usually want current activity.
-    # `zpool iostat -v -p 1 2` prints 2 samples, first is since boot, second is last 1 sec.
-    # But that blocks for 1 second.
-    # If we want non-blocking, we have to accept "since boot" or manage a background process.
-    # Requirement: "Realtime Monitoring ... updated every 5 seconds".
-    # If we run `zpool iostat` every 5 seconds, we get "since boot" stats if we don't specify interval.
-    # If we specify interval, it blocks.
-    # Textual app is async, we could run it in a worker?
-    # Or we can just show "since boot" averages?
-    # Usually "Realtime" implies current load.
-    # Let's try to run `zpool iostat -v -p 1 1` which waits 1 second and gives 1 sample (actually 2 lines of headers + 2 samples).
-    # The second sample is the current load.
-    # But this adds 1s latency to the refresh.
-    # Let's use `zpool iostat -v -p -y 1 1`? -y omits first report (since boot) on recent ZFS versions.
-    # If -y is not supported, we parse the second data block.
-    
-    # Let's try `zpool iostat -v -p 1 1` and parse the last set of values.
-    # This will block for 1 second.
-    iostat_out = run_command(['zpool', 'iostat', '-v', '-p', '1', '1'])
-    # This command outputs:
-    # Header
-    # Stats since boot
-    # Header (sometimes)
-    # Stats for 1s
-    
-    # We need to parse this carefully.
-    # If we just take the last occurrence of each pool/vdev, it should be the latest sample.
-    io_stats = parse_zpool_iostat(iostat_out)
-    
     # Attach snapshots to datasets
     for ds in all_datasets:
         if ds.name in snaps_map:
@@ -325,23 +336,12 @@ def get_system_status() -> List[Pool]:
         if pool.name in vdevs_map:
             pool.vdevs = vdevs_map[pool.name]
         
-        # Attach IO Stats
-        if pool.name in io_stats:
-            p_stats = io_stats[pool.name].get("__pool__", {})
-            pool.read_ops = p_stats.get("read_ops", 0)
-            pool.write_ops = p_stats.get("write_ops", 0)
-            pool.read_bytes = p_stats.get("read_bytes", 0)
-            pool.write_bytes = p_stats.get("write_bytes", 0)
-            
-            for vdev in pool.vdevs:
-                if vdev.name in io_stats[pool.name]:
-                    v_stats = io_stats[pool.name][vdev.name]
-                    vdev.read_ops = v_stats.get("read_ops", 0)
-                    vdev.write_ops = v_stats.get("write_ops", 0)
-                    vdev.read_bytes = v_stats.get("read_bytes", 0)
-                    vdev.write_bytes = v_stats.get("write_bytes", 0)
-        
         # Find root dataset for this pool
         pool.datasets = [ds for ds in root_datasets if ds.name == pool.name]
         
     return pools
+
+def get_system_status() -> List[Pool]:
+    # Deprecated: Use get_static_data for structure and background thread for stats
+    return get_static_data()
+

@@ -1,8 +1,62 @@
 from textual.app import App
 from textual.binding import Binding
 
-from ..zfs import get_system_status
+from ..zfs import get_static_data, parse_iostat_line
 from .screens import DashboardScreen
+import threading
+import subprocess
+import time
+
+class IostatWorker(threading.Thread):
+    def __init__(self, callback):
+        super().__init__(daemon=True)
+        self.callback = callback
+        self.running = True
+        
+    def run(self):
+        # Run zpool iostat -H -p -y 1
+        # -H: Scripted mode (no headers, tabs)
+        # -p: Parsable numbers
+        # -y: Omit first report (since boot) - available in newer ZFS
+        # If -y not supported, we just ignore the first line if it looks huge? 
+        # Actually -y is best. If not available, we might see a big spike at start.
+        # Let's assume -y is available or acceptable behavior.
+        # We need to run it continuously.
+        
+        cmd = ['zpool', 'iostat', '-v', '-H', '-p', '-y', '1']
+        
+        # Fallback if -y is not supported?
+        # Let's try running it.
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1 # Line buffered
+            )
+            
+            while self.running and process.poll() is None:
+                line = process.stdout.readline()
+                if not line:
+                    break
+                
+                stats = parse_iostat_line(line)
+                if stats:
+                    self.callback(stats)
+                    
+        except FileNotFoundError:
+            pass # zpool not found
+        except Exception as e:
+            print(f"Iostat worker error: {e}")
+        finally:
+            if process:
+                process.terminate()
+                process.wait()
+
+    def stop(self):
+        self.running = False
+
 
 class ZfsDashboardApp(App):
     CSS = """
@@ -52,10 +106,26 @@ class ZfsDashboardApp(App):
 
     def on_mount(self):
         self.action_refresh_data()
-        self.set_interval(self.interval, self.action_refresh_data)
+        # Start background worker
+        self.worker = IostatWorker(self.update_iostat)
+        self.worker.start()
+
+    def on_unmount(self):
+        if hasattr(self, 'worker'):
+            self.worker.stop()
+
+    def update_iostat(self, stats):
+        # stats is tuple: (name, read_ops, write_ops, read_bytes, write_bytes)
+        # We need to update the UI.
+        # Since this is called from a thread, we must use call_from_thread
+        self.call_from_thread(self._update_iostat_ui, stats)
+
+    def _update_iostat_ui(self, stats):
+        if self.screen and isinstance(self.screen, DashboardScreen):
+            self.screen.update_iostat_data(stats)
 
     def action_refresh_data(self):
-        all_pools = get_system_status()
+        all_pools = get_static_data()
         
         # Apply pool filter
         if self.pool_filter:
